@@ -1,0 +1,14 @@
+# Node.js dependencies
+node_modules/
+
+# Python byte‐code caches
+__pycache__/
+
+# Environment files in any “env” folder
+env/*.env
+
+# Root‐level environment file
+.env
+
+# All log files
+*.log
