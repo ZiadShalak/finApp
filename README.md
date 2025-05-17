@@ -48,6 +48,30 @@ A cross-platform financial application allowing users to save and manage stock t
    flask run      # backend
    ```
 
+## Database Migrations
+
+We use [Alembic](https://alembic.sqlalchemy.org/) to version and apply schema changes.
+
+### Prerequisite
+
+- Ensure `env/dev.env`’s `DATABASE_URL` points to your target Postgres instance (local or remote).
+
+### Generating a Migration
+
+After modifying models or DDL:
+```bash
+alembic revision --autogenerate -m "Describe change"
+```
+
+### Applying Migrations
+
+Apply the latest schema to the configured database:
+```bash
+alembic upgrade head
+```
+
+Commit the entire `migrations/` folder so every environment stays in sync.
+
 ## Contributing
 Contributions are welcome! Please open issues or submit pull requests for enhancements and bug fixes.
 
