@@ -4,8 +4,11 @@ node_modules/
 # Python byte‐code caches
 __pycache__/
 
-# Environment files in any “env” folder
+# Env files
+.env
 env/*.env
+
+
 
 # Root‐level environment file
 .env
