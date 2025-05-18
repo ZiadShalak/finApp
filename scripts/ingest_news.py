@@ -5,15 +5,23 @@ import psycopg2
 from psycopg2.extras import Json
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv("env/dev.env")
+
+# 1) Compute path to env/dev.env, relative to this script
+here = os.path.dirname(__file__)
+dotenv_path = os.path.join(here, "../env/dev.env")
+
+# 2) Load it explicitly
+load_dotenv(dotenv_path)
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise RuntimeError("API_KEY not set in env/dev.env")
+
+# # Load environment variables
 api_key = os.getenv("API_KEY")
 db_url  = os.getenv("DATABASE_URL")
 
-print("Using API key:", api_key)
-
-if not api_key:
-    raise RuntimeError("API_KEY not set in env/dev.env")
+# if not api_key:
+#     raise RuntimeError("API_KEY not set in env/dev.env")
 
 # Connect to the database
 conn = psycopg2.connect(db_url)

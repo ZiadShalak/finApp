@@ -7,7 +7,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from passlib.context import CryptContext
 
-pwd_ctx = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
+pwd_ctx = CryptContext(schemes=["bcrypt","pbkdf2_sha256"], deprecated="auto")
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 def get_conn():
