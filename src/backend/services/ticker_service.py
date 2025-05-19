@@ -1,57 +1,94 @@
+# src/backend/routes/tickers.py
 import os
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 from dotenv import load_dotenv
 import yfinance as yf
+from datetime import timedelta, datetime, timezone
+from flask import Blueprint, jsonify, request
+from config.settings import DATABASE_URL
 
-# load env
-BASE = os.path.abspath(os.path.dirname(__file__))
-ROOT = os.path.abspath(os.path.join(BASE, "..", ".."))
-load_dotenv(os.path.join(ROOT, "env", "dev.env"))
+bp = Blueprint("tickers", __name__, url_prefix="/tickers")
 
-DB_URL = os.getenv("DATABASE_URL")
+# Time‐to‐live for our cached rows
+CACHE_TTL = timedelta(minutes=5)
 
 def get_conn():
-    return psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
-def fetch_ticker(symbol):
+def fetch_basic(symbol):
+    """Fetch the basic fields, refreshing from yfinance if stale."""
     with get_conn() as conn, conn.cursor() as cur:
+        # 1) Try to read existing row
         cur.execute("""
-            SELECT symbol, name, current_price, market_cap, sector, exchange
-              FROM public.tickers
-             WHERE symbol=%s
+            SELECT
+              symbol, name, exchange, current_price,
+              sector, market_cap, last_fetched_at
+            FROM public.tickers
+            WHERE symbol = %s
         """, (symbol,))
-        return cur.fetchone()
+        row = cur.fetchone()
 
-def fetch_news(symbol, limit=10):
+        # 2) We'll use a single timezone-aware now
+        now_utc = datetime.now(timezone.utc)
+
+        # 3) Determine if we need to refresh from yfinance
+        needs_refresh = (
+            row is None                              or
+            row["last_fetched_at"] is None           or
+            row["last_fetched_at"] < (now_utc - CACHE_TTL)
+        )
+
+        if needs_refresh:
+            # 2) Fetch fresh data
+            info = yf.Ticker(symbol).info
+
+            # Upsert into the DB
+            cur.execute("""
+              INSERT INTO public.tickers
+                (symbol, name, exchange, current_price,
+                 sector, market_cap, raw_info,
+                 created_at, updated_at, last_fetched_at)
+              VALUES (%s,%s,%s,%s,%s,%s,%s, now(),now(),now())
+              ON CONFLICT (symbol) DO UPDATE SET
+                name            = EXCLUDED.name,
+                exchange        = EXCLUDED.exchange,
+                current_price   = EXCLUDED.current_price,
+                sector          = EXCLUDED.sector,
+                market_cap      = EXCLUDED.market_cap,
+                raw_info        = EXCLUDED.raw_info,
+                updated_at      = now(),
+                last_fetched_at = now()
+              RETURNING
+                symbol, name, exchange, current_price,
+                sector, market_cap
+            """, [
+              symbol,
+              info.get("longName")         or symbol,
+              info.get("exchange")         or None,
+              info.get("regularMarketPrice") or None,
+              info.get("sector")           or None,
+              info.get("marketCap")        or None,
+              Json(info)
+            ])
+            row = cur.fetchone()
+            conn.commit()
+
+        return dict(row)
+
+@bp.route("", methods=["GET"])
+def list_tickers():
+    """Autocomplete / small search against master_tickers table."""
+    q = (request.args.get("search","") + "%").upper()
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            SELECT title, url, published_at
-              FROM public.news n
-              JOIN public.tickers t ON t.id=n.ticker_id
-             WHERE t.symbol=%s
-             ORDER BY published_at DESC
-             LIMIT %s
-        """, (symbol, limit))
-        return cur.fetchall()
-
-def compute_indicators(symbol):
-    # disable auto_adjust warning by specifying it
-    df = yf.download(symbol, period="1mo", interval="1d", auto_adjust=False)["Close"]
-    delta   = df.diff()
-    up      = delta.clip(lower=0)
-    down    = -delta.clip(upper=0)
-    roll_up   = up.rolling(14).mean()
-    roll_down = down.rolling(14).mean()
-    rs       = roll_up / roll_down
-    rsi      = 100.0 - (100.0 / (1.0 + rs))
-    # drop NaNs, take last value, convert to native float
-    latest = rsi.dropna().iloc[-1].item()
-    return {"rsi": latest}
-
-
-
-# src/backend/services/ticker_service.py
+          SELECT symbol,name
+            FROM public.master_tickers
+           WHERE symbol ILIKE %s OR name ILIKE %s
+           ORDER BY symbol
+           LIMIT 10
+        """, (q,q))
+        return jsonify(cur.fetchall())
 
 def fetch_chart_data(symbol, days=30):
     data = yf.download(symbol, period=f"{days}d", interval="1d")
@@ -65,3 +102,35 @@ def fetch_chart_data(symbol, days=30):
         "volumes": data["Volume"].values.tolist(),
     }
 
+def fetch_news(symbol, limit=20):
+    """Fetch news for a ticker using yfinance."""
+    ticker = yf.Ticker(symbol)
+    news = ticker.news[:limit]
+    return news
+
+def compute_indicators(symbol):
+    """Compute technical indicators for a ticker."""
+    ticker = yf.Ticker(symbol)
+    # TODO: Implement technical indicators
+    return {
+        "rsi": None,
+        "macd": None,
+        "piotroski_score": None
+    }
+
+
+@bp.route("/<symbol>/basic")
+def ticker_basic(symbol):
+    return jsonify(fetch_basic(symbol))
+
+@bp.route("/<symbol>/news")
+def ticker_news(symbol):
+    return jsonify(fetch_news(symbol, limit=20))
+
+@bp.route("/<symbol>/indicators")
+def ticker_indicators(symbol):
+    return jsonify(compute_indicators(symbol))
+
+@bp.route("/<symbol>/chart")
+def ticker_chart(symbol):
+    return jsonify(fetch_chart_data(symbol, days=30))

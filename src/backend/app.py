@@ -17,7 +17,7 @@ CORS(app)
 
 # Import your service functions
 from services.ticker_service import (
-    fetch_ticker, fetch_news, compute_indicators, fetch_chart_data
+    fetch_basic, fetch_news, compute_indicators, fetch_chart_data
 )
 
 # DB
@@ -44,7 +44,7 @@ print("---------------------")
 # Single-detail endpoint
 @app.route("/tickers/<symbol>")
 def ticker_detail(symbol):
-    t = fetch_ticker(symbol)
+    t = fetch_basic(symbol)
     if not t:
         return jsonify({"error":"Ticker not found"}), 404
 
